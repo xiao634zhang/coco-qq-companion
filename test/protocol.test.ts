@@ -1,0 +1,10 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { Codex } from '../src/codex.ts';
+
+function client(){const c=new Codex(process.cwd(),'codex',()=>{});const sent:any[]=[];c.proc={stdin:{destroyed:false,write:(v:string)=>sent.push(JSON.parse(v))},kill:()=>{}} as any;return {c,sent};}
+test('JSON-RPC 响应关联正确且错误不会污染其他请求',async()=>{const{c,sent}=client();const a=c.request('one'),b=c.request('two');c.receive({id:sent[1].id,result:{ok:2}});c.receive({id:sent[0].id,error:{message:'failed'}});assert.deepEqual(await b,{ok:2});await assert.rejects(a,/failed/);c.stop();});
+test('只输出最终回复，忽略思考和过程评论',async()=>{const{c,sent}=client();const answer=c.turn('t','你好','a','low');c.receive({method:'turn/started',params:{threadId:'t',turn:{id:'u'}}});c.receive({method:'item/completed',params:{threadId:'t',item:{id:'i1',type:'agentMessage',text:'正在思考',phase:'commentary'}}});c.receive({method:'item/completed',params:{threadId:'t',item:{id:'i2',type:'agentMessage',text:'你好呀',phase:'final_answer'}}});c.receive({id:sent[0].id,result:{turn:{id:'u'}}});c.receive({method:'turn/completed',params:{threadId:'t',turn:{id:'u',status:'completed'}}});assert.equal(await answer,'你好呀');c.stop();});
+test('回合失败即使有文字也不视为成功',async()=>{const{c,sent}=client();const answer=c.turn('t','hi','a','low');c.receive({id:sent[0].id,result:{turn:{id:'u'}}});c.receive({method:'turn/completed',params:{threadId:'t',turn:{id:'u',status:'failed',error:{message:'quota'}}}});await assert.rejects(answer,/quota/);c.stop();});
+test('未知回合不能调用记忆工具；所有额外工具审批被拒绝',async()=>{const{c,sent}=client();let calls=0;c.toolHandler=()=>{calls++};c.receive({id:1,method:'item/tool/call',params:{threadId:'unknown',tool:'companion_memory_read',arguments:{}}});await new Promise(r=>setImmediate(r));assert.equal(calls,0);assert.equal(sent[0].result.success,false);c.receive({id:2,method:'item/commandExecution/requestApproval',params:{}});await new Promise(r=>setImmediate(r));assert.equal(sent[1].result.decision,'decline');c.stop();});
+test('子进程退出时所有待处理请求立即失败',async()=>{const{c}=client();const a=c.request('pending');c.stop();await assert.rejects(a,/停止/);assert.equal(c.pending.size,0);});

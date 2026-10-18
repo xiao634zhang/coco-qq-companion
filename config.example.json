@@ -1,0 +1,28 @@
+{
+  "ownerQQ": "",
+  "botQQ": "",
+  "model": "",
+  "effort": "",
+  "port": 3210,
+  "codexPath": "",
+  "budget": {
+    "enabled": false,
+    "maxPercent": 20,
+    "reservePercent": 20
+  },
+  "snow": {
+    "wsUrl": "ws://127.0.0.1:3001",
+    "httpUrl": "http://127.0.0.1:3000",
+    "accessToken": ""
+  },
+  "proactive": {
+    "enabled": false,
+    "startHour": 8,
+    "endHour": 24,
+    "idleMinutes": 30,
+    "minMinutes": 30,
+    "maxMinutes": 90,
+    "gapMinutes": 60,
+    "dailyMax": 8
+  }
+}
