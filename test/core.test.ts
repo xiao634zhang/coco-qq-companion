@@ -62,6 +62,34 @@ function setup(t:any){
 }
 const event={post_type:'message',message_type:'private',sub_type:'friend',user_id:'100000001',self_id:'999999',message_id:'m1',message:[{type:'text',data:{text:'你好'}}]};
 
+test('连续文字合成一次完整输入，重复消息不重复加入，所有消息终态一致',async t=>{
+ const{app,store,qq}=setup(t);app.chatMergeMs=15;app.extensions.save({humanize:false,typing:false});
+ const inputs:string[]=[];app.chat=async(value:string)=>{inputs.push(value);return '一起回答';};
+ const send=(id:string,value:string)=>app.receive({...event,message_id:id,message:[{type:'text',data:{text:value}}]});
+ send('burst1','我想去露营');send('burst2','周末去');send('burst2','周末去');send('burst3','帮我想想带什么');
+ await app.tail;assert.deepEqual(inputs,['我想去露营\n周末去\n帮我想想带什么']);assert.deepEqual(qq.sent,['一起回答']);
+ for(const id of ['burst1','burst2','burst3'])assert.equal(store.deliveries()['qq:999999:100000001:'+id].status,'sent');
+});
+test('忙碌期间积压文字共用一项队列，指令分隔前后消息',async t=>{
+ const{app,store}=setup(t);app.chatMergeMs=10;
+ const inputs:string[]=[],replies:string[]=[];app.chat=async value=>{inputs.push(value);return '收到';};
+ app.deliver=async(id,value)=>{replies.push(value);store.delivery(id,{status:'sent'});return {kind:'sent'} as any;};
+ let release!:()=>void;const gate=new Promise<void>(r=>release=r);void app.enqueue(()=>gate);
+ const send=(id:string,value:string)=>app.receive({...event,message_id:id,message:[{type:'text',data:{text:value}}]});
+ send('one','第一组');send('two','补充');assert.equal(app.queueCount,2);
+ send('command','/状态');send('three','第二组');send('four','再补充');release();await app.tail;
+ assert.deepEqual(inputs,['第一组\n补充','第二组\n再补充']);assert.equal(replies.length,3);
+});
+test('合并输入失败后整组标记失败，暂停仍立即生效',async t=>{
+ const{app,store}=setup(t);app.chatMergeMs=10;app.chat=async()=>{throw Error('test model failure');};
+ const send=(id:string,value:string)=>app.receive({...event,message_id:id,message:[{type:'text',data:{text:value}}]});
+ send('fail1','第一句');send('fail2','第二句');await app.tail;
+ for(const id of ['fail1','fail2'])assert.equal(store.deliveries()['qq:999999:100000001:'+id].status,'failed');
+ app.deliver=async(id)=>{store.delivery(id,{status:'sent'});return {kind:'sent'} as any;};
+ send('pause1','还有一句');send('pause2','/暂停');assert.equal(store.state().paused,true);await app.tail;
+ assert.equal(store.deliveries()['qq:999999:100000001:pause1'].status,'failed');
+});
+
 test('北京时间午夜日界与活动时段',t=>{const{store}=setup(t);const now=Date.parse('2026-10-18T16:00:00Z');assert.deepEqual(shanghai(now),{day:'2026-10-19',hour:0,time:'2026-10-19 00:00:00 北京时间'});const s={...store.state(),lastUserAt:now-3600000};assert.equal(proactiveEligible(store.config(),s,true,false,now),false);assert.equal(proactiveEligible(store.config(),s,true,false,now+8*3600000),true);});
 test('随机调度严格落在 30–90 分钟且重启不补发',t=>{const{store}=setup(t);assert.equal(nextCheck(store.config(),1000,()=>0),1801000);assert.equal(nextCheck(store.config(),1000,()=>1),5401000);});
 test('主动聊天的每日次数、间隔、闲置和忙碌限制',t=>{const{store}=setup(t),now=Date.parse('2026-10-18T04:00:00Z'),c=store.config();const s={...store.state(),lastUserAt:now-3600000};assert(proactiveEligible(c,s,true,false,now));for(const patch of [{paused:true},{blocked:{kind:'quota' as const,reason:'x',resetAt:null}},{lastUserAt:now-100},{lastProactiveAt:now-100},{proactiveDay:shanghai(now).day,proactiveCount:8}])assert(!proactiveEligible(c,{...s,...patch},true,false,now));assert(!proactiveEligible(c,s,false,false,now));assert(!proactiveEligible(c,s,true,true,now));assert(proactiveEligible(c,{...s,proactiveDay:'2026-10-17',proactiveCount:8},true,false,now));});

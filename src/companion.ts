@@ -15,6 +15,7 @@ import { functionTool, type ToolContent } from './tool-result.ts';
 import { Integrations, INTEGRATION_TOOLS } from './integrations.ts';
 
 const SUMMARY_SCHEMA = { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'], additionalProperties: false };
+type ChatBurst = { keys: string[]; texts: string[]; started: number; updated: number; closed: boolean };
 export class Companion {
   store: Store;
   codex: Codex;
@@ -45,6 +46,9 @@ export class Companion {
   media:Media;
   integrations:Integrations;
   voiceUsedThisTurn=false;
+  chatMergeMs=1800;
+  chatMergeMaxMs=8000;
+  pendingChat?:ChatBurst;
   constructor(store: Store, codex?: Codex, qq?: OneBot, taskCodex?: Codex, deviceCodex?: Codex) {
     this.store = store;
     this.extensions=new Extensions(store);this.media=new Media(store);this.integrations=new Integrations(this);
@@ -294,13 +298,43 @@ export class Companion {
     let value = privateText(event); if (!value) return;
     const voice=Array.isArray(event.message)?event.message.find(s=>s.type==='record'):undefined;
     this.store.delivery(key, { status: 'received' }); this.store.updateState({ lastUserAt: Date.now() });
+    if(voice||value.startsWith('/')){if(this.pendingChat)this.pendingChat.closed=true;this.pendingChat=undefined;}
     if(value.startsWith('/取消任务 ')){let answer;try{answer=this.tasks.cancel(value.slice(6).trim()).message;}catch(e){answer=String(e).replace(/^Error: /,'');}void this.enqueue(()=>this.deliver(key,answer)).catch(e=>this.store.log('queue.error',String(e)));return;}
     const stopMatch=value.match(/^\/停止任务(?:\s+(网页|安卓|游戏))?$/);
     if(stopMatch) { const scope=stopMatch[1]?({'网页':'web','安卓':'android','游戏':'game'} as Record<string,'web'|'android'|'game'>)[stopMatch[1]]:undefined;this.tasks.stop('管理员停止',scope); void this.enqueue(()=>this.deliver(key,'指定任务已停止。')).catch(e=>this.store.log('queue.error',String(e)));return; }
     if(/^\/(模型\s|思考强度\s|重置会话$)/.test(value))this.tasks.suspend();
     // Pause acts immediately even if a model turn is currently running.
     if (value === '/暂停') { this.pause(); void this.enqueue(() => this.deliver(key, '已暂停，主动聊天也已停止。')).catch(e => this.store.log('queue.error', String(e))); return; }
+    // Coalesce ordinary text before entering the model queue. Commands and media
+    // stay separate, so later text cannot become part of a preceding command.
+    let burst:ChatBurst|undefined;
+    if(!voice&&!value.startsWith('/')&&Array.isArray(event.message)&&event.message.some(s=>s.type!=='text')){
+      if(this.pendingChat)this.pendingChat.closed=true;
+      this.pendingChat=undefined;
+    }else if(!voice&&!value.startsWith('/')){
+      const pending=this.pendingChat;
+      if(pending&&!pending.closed&&pending.keys.length<20&&pending.texts.join('\n').length+value.length+1<=4000){
+        pending.keys.push(key);pending.texts.push(value);pending.updated=Date.now();return;
+      }
+      if(pending)pending.closed=true;
+      burst={keys:[key],texts:[value],started:Date.now(),updated:Date.now(),closed:false};
+      this.pendingChat=burst;
+    }else{
+      if(this.pendingChat)this.pendingChat.closed=true;
+      this.pendingChat=undefined;
+    }
     void this.enqueue(async () => {
+      if(burst){
+        while(!burst.closed&&!this.stopping&&!this.store.state().paused){
+          const remaining=Math.min(burst.updated+this.chatMergeMs,burst.started+this.chatMergeMaxMs)-Date.now();
+          if(remaining<=0)break;
+          await new Promise(r=>setTimeout(r,remaining));
+        }
+        burst.closed=true;if(this.pendingChat===burst)this.pendingChat=undefined;
+        value=burst.texts.join('\n');
+        for(const id of burst.keys)this.store.delivery(id,{status:'processing'});
+        this.store.log('qq.chat_batch',{messages:burst.keys.length});
+      }
       this.store.delivery(key, { status: 'processing' });
       const voiceStarted=Date.now();let voicePending=!!voice;
       const voiceProgress=voice?setTimeout(()=>{void this.deliver(key+':voice-progress','语音收到了，我在处理，稍等一下。',false,undefined,()=>voicePending&&!this.store.state().paused&&!this.stopping).catch(e=>this.store.log('voice.progress_failed',String(e)));},8000):undefined;
@@ -316,7 +350,7 @@ export class Companion {
         voicePending=false;if(voice)this.store.log('voice.stage',{eventId:key,stage:'reply_ready',elapsedMs:Date.now()-voiceStarted});
         if (this.store.state().paused || this.stopping) { this.store.delivery(key, { status: 'interrupted' }); return; }
         const settings=this.extensions.settings();
-        const parts=settings.humanize?splitReply(answer,settings.maxParts):[answer];
+        const parts=settings.humanize&&(!burst||burst.keys.length===1)?splitReply(answer,settings.maxParts):[answer];
         for(let i=0;i<parts.length;i++){if(this.store.state().paused||this.stopping)break;if(settings.typing)try{await this.qq.api('set_input_status',{user_id:Number(c.ownerQQ),event_type:1});}catch{}
           if(settings.humanize)await new Promise(r=>setTimeout(r,Math.min(2200,500+parts[i].length*25)+Math.random()*500));
           const result=await this.deliver(i===0?key:key+':part:'+i,parts[i],true);if(result?.kind!=='sent')break;
@@ -327,8 +361,14 @@ export class Companion {
         this.store.log('qq.processing_failed', String(e));
         const reason=this.store.state().blocked?.reason||this.ledger.blocked(this.limits)?.reason;
         if(reason&&!this.store.state().paused&&this.qq.online&&this.qq.connected)await this.deliver(key,`模型调用已暂停：${reason}`);
-      }finally{voicePending=false;clearTimeout(voiceProgress);}
-    }).catch(e => { this.store.delivery(key, { status: 'failed', error: String(e) }); });
+      }finally{
+        voicePending=false;clearTimeout(voiceProgress);
+        if(burst){const result=this.store.deliveries()[key];for(const id of burst.keys.slice(1))this.store.delivery(id,{status:result?.status??'failed',messageId:result?.messageId,error:result?.error});}
+      }
+    }).catch(e => {
+      if(this.pendingChat===burst)this.pendingChat=undefined;
+      for(const id of burst?.keys??[key])this.store.delivery(id,{status:'failed',error:String(e)});
+    });
   }
   receiveGroup(event:PrivateEvent){
     const settings=this.extensions.settings(),group=String(event.group_id??'');if(!settings.groups.includes(group)||String(event.self_id)!==this.qq.selfId||String(event.user_id)===this.qq.selfId||event.message_id===undefined||this.store.state().paused)return;
