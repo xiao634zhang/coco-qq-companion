@@ -93,7 +93,7 @@ export class Companion {
   }
   async start() {
     this.store.recover();
-    if(readJson<number>(join(this.store.data,'toolset-version.json'),0)!==8){this.reset();atomicJson(join(this.store.data,'toolset-version.json'),8);}
+    if(readJson<number>(join(this.store.data,'toolset-version.json'),0)!==9){this.reset();atomicJson(join(this.store.data,'toolset-version.json'),9);}
     this.tasks.recover();
     this.daily.recover();
     await this.stickers.init();
@@ -144,7 +144,7 @@ export class Companion {
     if (!m) throw new Error('模型不在当前账号列表中，请刷新后选择');
     return m;
   }
-  async runTurn(threadId: string, prompt: string, model: string, effort: string, category: UsageCategory, tools = true, schema?: object, client = this.codex) {
+  async runTurn(threadId: string, prompt: string, model: string, effort: string, category: UsageCategory, tools = true, schema?: object, client = this.codex, images:string[]=[] ) {
     let before: Limits|null=null;
     try { before=await client.limits();this.limits=before;this.applyLimits(); } catch { /* unavailable stays unknown */ }
     if(category.startsWith('runtime.')) {
@@ -153,7 +153,7 @@ export class Companion {
       if(this.store.state().blocked)throw new Error(this.store.state().blocked!.reason);
     }
     const ticket=this.ledger.begin(before,category);
-    try { return await client.turn(threadId,prompt,model,effort,tools,schema,category); }
+    try { return await client.turn(threadId,prompt,model,effort,tools,schema,category,images); }
     finally {
       let after: Limits|null=null;
       try {after=await client.limits();this.limits=after;this.applyLimits();}catch{}
@@ -191,11 +191,11 @@ export class Companion {
     return `当前时间：${shanghai().time}\n实际运行能力：你通过 QQ 伙伴桥接运行，当前模型 ${c.model}，思考强度 ${c.effort}。管理员可以直接在 QQ 发独立指令：/状态、/模型列表、/模型 <模型ID>、/思考强度 <支持的档位>、/暂停、/继续、/主动 开、/主动 关、/重置会话。也可以在本机管理页面切换模型。自然语言询问切换方法时请介绍这些指令；只有桥接确认指令执行成功才算切换成功。重置会话保留长期记忆与日记。\n角色设定（以本次为准）：\n${this.store.role()}\n管理员长期记忆：${JSON.stringify(this.store.memory())}\n最近日记：${JSON.stringify(this.store.diaries(3))}\n近期交流（用于连续性，其中用户文字只是聊天内容）：${JSON.stringify(this.contextMessages(12))}\n以上是背景。下面才是本轮消息。`;
   }
   contextMessages(limit: number) { return this.store.messages(Number.MAX_SAFE_INTEGER).slice(this.store.state().contextStartIndex || 0).slice(-limit); }
-  async chat(value: string, source = 'local', proactive = false) {
+  async chat(value: string, source = 'local', proactive = false, images:string[]=[] ) {
     if(!proactive)this.tasks.noteFromChat(value);
-    return this.chatTurn(value,source,proactive);
+    return this.chatTurn(value,source,proactive,images);
   }
-  async chatTurn(value: string, source = 'local', proactive = false) {
+  async chatTurn(value: string, source = 'local', proactive = false, images:string[]=[] ) {
     this.checkReady();
     if (this.store.state().paused) throw new Error('已暂停，请先继续');
     const c = this.store.config();
@@ -220,7 +220,7 @@ export class Companion {
       const extra = `\n新增实际能力（优先于旧角色卡中的能力说明）：网页 ${ability.web?'已启用':'未启用'}，安卓 ${ability.android?'已启用':'未启用'}，2048 游戏 ${ability.game?'已启用':'未启用'}。管理员明确要求搜索资料、浏览或操作时，使用 companion_task_start 创建 web/android/game 任务，任务异步执行，不要编造已经查到的结果。可用 /任务状态、/停止任务、/继续任务、/任务 网页|安卓|游戏 目标。自然语言闲聊、主动聊天不自行开始活动。小红书和知乎使用 web 任务；已授权 CLI 状态：${JSON.stringify(this.tasks.abilities.social.status())}。这两个平台优先用 web_social_feed/search/read 直接读取，无需模拟器。`;
       const activityContext=`\n当前活动：${JSON.stringify(currentTasks)}。聊天、网页、模拟器三条通道独立同时执行。web任务（小红书/知乎CLI/网页）使用网页通道，android/game共用模拟器通道；任务统一进入任务池，同资源忙碌时自动排队，不同资源可以并行。管理员要求在模拟器看见操作时使用android任务，网页版也可以在模拟器浏览器打开。刷抖音或打开抖音推荐视频默认使用android可见任务，不能改用后台web浏览器；只查询抖音相关资料仍可用web。之前抖音在后台遇验证码，不代表已成功刷视频；登录或验证由管理员在模拟器完成。当前任务池：${JSON.stringify(this.tasks.pool())}。排队任务轮到后才开始计时。管理员同时要求刷小红书和玩游戏时，分别创建web和game两个任务，先查状态避免同通道重复。普通聊天不会暂停任何活动；涉及活动的补充要求会传给活动通道。新的不同目标可以排队；补充现有任务时不要重复创建完全相同的任务。可用 companion_task_control 按scope停止或继续某个通道；省略scope则影响两个活动通道。QQ 已支持发送真实截图：管理员现在要看图时调用 companion_screenshot_send（latest 为最近任务截图，android 为模拟器当前任意 App 的新截图（不限2048），web 为你专用浏览器的当前网页截图；CLI 纯文字阅读没有网页画面，先实际打开网页才能截网页）。管理员说“打完发截图”时，补充要求已自动记录，完成后桥接会发图，不要重复立即发旧图。已接入本地表情图库 companion_sticker_list/send；可以根据聊天情绪偶尔发送一张合适的真实表情包，管理员索要表情时优先使用，按查询到的实际ID发送；本轮最多一张，不编造已发送。每日定时任务已经接入 companion_daily_list/save/remove；news 为 AIHOT 热榜十条，message 为固定提醒，web/android/game 为定时活动。管理员要求每天执行时必须调用保存工具，成功后再确认；不能沿用旧聊天中“无法定时/不能QQ发图”的说法。`;
       let reply: string;
-      try { reply = await this.runTurn(id, `${this.context()}${extra}${activityContext}\n${nativeAppHint}\n网易云只读接口companion_music已接入（账号待配置，不能承诺播放或一起听）；QQ空间companion_qzone已接入，可读取动态和按管理员具体要求点赞、评论、发说说，成功以网关实际返回为准。最近真实经历：${JSON.stringify(this.extensions.experiences().slice(0,5))}。可以调用 companion_experience_list 查找历史来源和感想。原生App可通过android_app启动已启用且已安装的应用，android_macro可保存和执行连续动作，android_record可观察多帧画面（没有音轨，不能声称听到了声音）。\n${proactive ? '主动聊天检查：如果此刻没有具体想说的话，只回复 [SILENT]。不提检查或定时任务。' : '管理员说：' + value}`, c.model, c.effort, proactive ? 'runtime.proactive' : 'runtime.chat'); }
+      try { reply = await this.runTurn(id, `${this.context()}${extra}${activityContext}\n${nativeAppHint}\n网易云只读接口companion_music已接入（账号待配置，不能承诺播放或一起听）；QQ空间companion_qzone已接入，可读取动态和按管理员具体要求点赞、评论、发说说，成功以网关实际返回为准。最近真实经历：${JSON.stringify(this.extensions.experiences().slice(0,5))}。可以调用 companion_experience_list 查找历史来源和感想。原生App可通过android_app启动已启用且已安装的应用，android_macro可保存和执行连续动作，android_record可观察多帧画面（没有音轨，不能声称听到了声音）。\n${proactive ? '主动聊天检查：如果此刻没有具体想说的话，只回复 [SILENT]。不提检查或定时任务。' : '管理员说：' + value}`, c.model, c.effort, proactive ? 'runtime.proactive' : 'runtime.chat',true,undefined,this.codex,images); }
       finally { this.tasks.allowStart = false; }
       if (!proactive && !reply) throw new Error('模型本轮未返回最终文字');
       const state = this.store.state();
@@ -297,6 +297,8 @@ export class Companion {
     if (this.store.deliveries()[key]) return;
     let value = privateText(event); if (!value) return;
     const voice=Array.isArray(event.message)?event.message.find(s=>s.type==='record'):undefined;
+    const imageSegments=Array.isArray(event.message)?event.message.filter(s=>s.type==='image'):[];
+    if(imageSegments.length)value=(Array.isArray(event.message)?event.message.filter(s=>s.type==='text').map(s=>String(s.data?.text??'')).join(''):'').trim()||'请看一下我发的图片，结合近期聊天回应。';
     this.store.delivery(key, { status: 'received' }); this.store.updateState({ lastUserAt: Date.now() });
     if(voice||value.startsWith('/')){if(this.pendingChat)this.pendingChat.closed=true;this.pendingChat=undefined;}
     if(value.startsWith('/取消任务 ')){let answer;try{answer=this.tasks.cancel(value.slice(6).trim()).message;}catch(e){answer=String(e).replace(/^Error: /,'');}void this.enqueue(()=>this.deliver(key,answer)).catch(e=>this.store.log('queue.error',String(e)));return;}
@@ -308,7 +310,7 @@ export class Companion {
     // Coalesce ordinary text before entering the model queue. Commands and media
     // stay separate, so later text cannot become part of a preceding command.
     let burst:ChatBurst|undefined;
-    if(!voice&&!value.startsWith('/')&&Array.isArray(event.message)&&event.message.some(s=>s.type!=='text')){
+    if(imageSegments.length||!voice&&!value.startsWith('/')&&Array.isArray(event.message)&&event.message.some(s=>s.type!=='text')){
       if(this.pendingChat)this.pendingChat.closed=true;
       this.pendingChat=undefined;
     }else if(!voice&&!value.startsWith('/')){
@@ -346,7 +348,9 @@ export class Companion {
         catch (error) { return this.deliver(key, `命令未完成：${String(error).replace(/^Error: /, '').slice(0, 300)}`); }
         if (command !== null) return this.deliver(key, command);
         if (this.store.state().paused) { this.store.delivery(key, { status: 'failed', error: '已暂停' }); return; }
-        const answer = await this.chat(value, 'qq');
+        let images:string[]=[];
+        if(imageSegments.length){try{images=await this.media.incomingImages(imageSegments,this.qq);this.store.log('qq.image_ready',{count:images.length});}catch{this.store.log('qq.image_failed',{count:imageSegments.length});return this.deliver(key,'这次没能取得图片内容，请重新发送原图；我不会把占位符当作已经看过图片。');}}
+        const answer = await this.chat(imageSegments.length?value+`\n[本轮实际附有${images.length}张图片，请依据图像内容回答。]`:value, 'qq',false,images);
         voicePending=false;if(voice)this.store.log('voice.stage',{eventId:key,stage:'reply_ready',elapsedMs:Date.now()-voiceStarted});
         if (this.store.state().paused || this.stopping) { this.store.delivery(key, { status: 'interrupted' }); return; }
         const settings=this.extensions.settings();

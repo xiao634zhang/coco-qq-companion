@@ -205,10 +205,10 @@ export class Codex extends EventEmitter {
     await this.start();
     return this.request('thread/resume', { threadId, model, baseInstructions: role, sandbox: 'read-only', approvalPolicy: 'on-request', excludeTurns: true, serviceTier: 'default' });
   }
-  async turn(threadId: string, prompt: string, model: string, effort: string, tools = true, schema?: object, category: UsageCategory = 'development.verify'): Promise<string> {
+  async turn(threadId: string, prompt: string, model: string, effort: string, tools = true, schema?: object, category: UsageCategory = 'development.verify', images:string[]=[]): Promise<string> {
     if (this.active) throw new Error('Codex 正在处理上一轮');
     return this.waitTurn(threadId, tools, () => this.request('turn/start', {
-      threadId, model, ...(effort ? { effort } : {}), input: [{ type: 'text', text: prompt }],
+      threadId, model, ...(effort ? { effort } : {}), input: [{ type: 'text', text: prompt },...images.map(url=>({type:'image',url}))],
       environments: [], serviceTierForTurn: 'default', ...(schema ? { outputSchema: schema } : {})
     }), model, category);
   }
