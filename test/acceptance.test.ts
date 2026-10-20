@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync,rmSync } from 'node:fs';
+import { mkdtempSync,rmSync,writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join,resolve,sep } from 'node:path';
 import { EventEmitter } from 'node:events';
@@ -22,6 +22,17 @@ function fixture(t:any) {
   t.after(()=>{app.stop();const path=resolve(root);if(!path.startsWith(resolve(tmpdir())+sep)||!path.includes('qq-companion-test-'))throw new Error('unsafe cleanup');rmSync(path,{recursive:true,force:true});});
   return {app,store,codex,qq,sent,turns:()=>turns};
 }
+test('重启恢复只连接已通过验证的QQ配置',async t=>{
+  const {app,store,qq}=fixture(t);let starts=0;
+  (qq as any).start=()=>{starts++};
+  writeFileSync(join(store.data,'verification.json'),JSON.stringify({passed:true}));
+  await app.start();assert.equal(starts,1);
+});
+test('首次启动未验证时不自动连接QQ',async t=>{
+  const {app,qq}=fixture(t);let starts=0;
+  (qq as any).start=()=>{starts++};
+  await app.start();assert.equal(starts,0);
+});
 test('真实主动链路计次，未满一小时时不再调用模型',async t=>{const{app,store,sent,turns}=fixture(t);await app.tick();assert.equal(turns(),1);assert.equal(sent.length,1);assert.equal(store.state().proactiveCount,1);app.nextCheckAt=0;await app.tick();assert.equal(turns(),1);});
 test('主动消息发送不确定也占次数，防止重复主动尝试',async t=>{const{app,store,qq}=fixture(t);qq.send=async()=>({kind:'uncertain',messageId:''});await app.tick();assert.equal(store.state().proactiveCount,1);assert.equal(Object.values(store.deliveries())[0].status,'uncertain');});
 test('模型生成期间新用户消息抑制主动发送',async t=>{const{app,store,codex,sent}=fixture(t);codex.turn=async()=>{store.updateState({lastUserAt:Date.now()});return '今天好吗'};await app.tick();assert.equal(sent.length,0);assert.equal(store.state().proactiveCount,0);});

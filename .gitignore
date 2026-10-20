@@ -32,11 +32,13 @@
 !/scripts/social-login.ps1
 !/scripts/speak-local.ps1
 !/scripts/start.ps1
+!/scripts/start-snowluma.ps1
 !/scripts/stop.ps1
 !/scripts/audit-public.mjs
 !/docs/
 /docs/*
 !/docs/INSTALLATION.md
+!/docs/GROWTH.md
 !/docs/ARCHITECTURE.md
 !/docs/DEVELOPMENT.md
 !/vendor/

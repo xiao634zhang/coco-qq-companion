@@ -1,6 +1,6 @@
 {
   "name": "qq-codex-companion",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -17,9 +17,18 @@
     "typescript": "~5.9.3"
   },
   "dependencies": {
+    "@huggingface/transformers": "4.3.1",
     "@modelcontextprotocol/sdk": "1.32.1",
+    "fflate": "0.8.3",
+    "mineflayer": "4.39.0",
+    "mineflayer-pathfinder": "2.4.5",
+    "pixi.js": "6.5.10",
     "playwright": "1.64.1",
-    "sharp": "0.35.5"
+    "sharp": "0.35.5",
+    "undici": "8.12.3"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
   },
   "license": "MIT",
   "description": "Windows QQ AI companion powered by Codex App Server",

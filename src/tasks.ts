@@ -50,6 +50,7 @@ export class Tasks {
   save(task:Activity){this.forScope(task.scope).save(task);}
   start(input:any,source:'local'|'qq'='local',category?:UsageCategory){
     input={...input,scope:visibleBrowsingScope(input.scope,String(input.goal??''))};
+    this.app.modules?.assert(input.scope==='web'?'web':'android');
     const lane=this.forScope(input.scope);if(this.active().length>=this.pool().maxTasks)throw Error(`任务池已满，上限 ${this.pool().maxTasks} 个，请先完成或取消任务`);
     const waiting=lane.executing||!!lane.current()&&['running','suspended'].includes(lane.current()!.status)||this.all().some(t=>activityLane(t.scope)===lane.lane&&t.status==='queued');
     return {...lane.start(input,source,category,waiting),scope:input.scope};
@@ -114,7 +115,7 @@ export class TaskLane {
   resume(){const t=this.current();if(t?.status!=='suspended')throw new Error('没有挂起的任务');this.app.checkReady();if(this.store.state().paused)throw new Error('请先继续伙伴');if(Date.now()>=t.deadline){this.stop('原截止时间已到');throw new Error('活动已过期，请新建任务');}if(t.model!==this.store.config().model)throw new Error('模型已切换，请重新创建任务');t.status='running';t.reason='';this.save(t);this.schedule();return {message:'任务已继续，截止时间保持不变'};}
   guard(){const t=this.current();if(!t||t.id!==this.activeId||t.status!=='running'||this.app.stopping||this.store.state().paused)throw new Error('任务已停止或挂起，不再操作');if(Date.now()>=t.deadline||t.actions>=t.maxActions){this.stop('达到时间或动作上限');throw new Error('活动已到上限');}if(t.source==='qq'&&(!this.app.qq.connected||!this.app.qq.online)){this.stop('QQ 已断线');throw new Error('QQ 已断线');}const blocked=this.app.ledger.blocked(this.app.limits);if(blocked||this.store.state().blocked){this.stop(blocked?.reason||this.store.state().blocked!.reason);throw new Error('额度或登录状态阻止操作');}return t;}
   async tool(name:string,args:any){
-    const task=this.guard();
+    const task=this.guard();this.app.modules?.assert(task.scope==='web'?'web':'android');
     if(!this.abilities.tools(task.scope).some(t=>t.name===name))throw new Error('当前活动未授权此工具');
     if(name==='android_macro'){
       const path=join(this.store.data,'phone-macros.json'),macros=readJson<Record<string,any[]>>(path,{});
@@ -145,7 +146,7 @@ export class TaskLane {
         this.actedSinceObservation=true;this.repeatedObservations=0;
       }
       this.failures=0;this.log('result',{name,ok:true});return value;
-    }catch(e){this.log('result',{name,ok:false,error:String(e)});if(++this.failures>=3)this.stop('连续三次操作失败');throw e;}
+    }catch(e){this.log('result',{name,ok:false,error:String(e)});if(/登录|验证码|超时|timed? ?out|network|fetch failed|ECONN/i.test(String(e))){const active=this.current();if(active?.status==='running'){active.status='suspended';active.reason=String(e).slice(0,500);this.save(active);}}if(++this.failures>=3)this.stop('连续三次操作失败');throw e;}
   }
   async step(id:string){
     const t=this.current();if(this.executing||t?.id!==id||t.status!=='running')return;
@@ -163,7 +164,7 @@ export class TaskLane {
       else if(result.startsWith('[TASK_DONE]')){current.status='completed';current.reason='任务完成';}
       else if(current.actions===t.actions&&this.toolsThisStep===0){current.status='failed';current.reason='模型未执行操作，活动已结束';}
       this.save(current);if(current.status==='suspended'){this.store.message('assistant',current.summary,'task',current.model);if(current.source==='qq'&&this.app.qq.connected&&this.app.qq.online)await this.app.deliver('task-waiting:'+id,current.summary+`\n请在实际页面处理后用 /继续任务 ${current.scope==='web'?'网页':'安卓'} 继续；原截止时间不延长。`);}else if(current.status!=='running')await this.notify(id);
-    }catch(e){if(this.current()?.status==='running'){this.app.onModelError(e);this.fail(String(e));}}
+    }catch(e){if(this.current()?.status==='running'){this.app.onModelError(e);if(/登录|验证码|超时|timed? ?out|network|fetch failed|ECONN/i.test(String(e))){const current=this.current()!;current.status='suspended';current.reason=String(e).slice(0,500);this.save(current);this.log('suspended',current.reason);}else this.fail(String(e));}}
     finally{this.executing=false;this.activeId='';this.schedule();}
   }
   fail(reason:string){const t=this.current();if(t?.status!=='running')return;t.status='failed';t.reason=reason.slice(0,500);this.save(t);this.log('failed',t.reason);void this.notify(t.id);}
@@ -171,6 +172,7 @@ export class TaskLane {
     const t=this.all().find(t=>t.id===id);if(!t||t.notified||['running','suspended','queued'].includes(t.status))return;
     t.notified=true;this.save(t);
     this.app.extensions?.remember(t);
+    if(t.status==='completed'&&!t.category.startsWith('development.')&&this.app.modules?.settings().enabled.recall!==false)try{this.app.recall?.interest({topic:t.goal.slice(0,80),note:t.summary.slice(0,1000),sourceIds:[t.id]});}catch{}
     const result=`活动${t.status==='completed'?'完成':'已结束'}：${t.reason}\n${t.summary||'尚无结果摘要'}\n工具操作 ${t.actions} 次`;
     this.store.message('assistant',result,'task',t.model);
     if(t.source==='qq'&&this.app.qq.online&&this.app.qq.connected&&!this.store.state().paused)try{

@@ -14,6 +14,7 @@ export class SocialCLI {
   save(input:any){const c=this.settings();for(const k of ['xhs','zhihu'] as const)if(input[k]!==undefined){if(typeof input[k]!=='boolean')throw Error('平台开关必须是布尔值');c[k]=input[k];}atomicJson(join(this.root,'data/social-cli.json'),c);return this.status();}
   status(){const c=this.settings(),login=readJson<Record<string,{stage?:string;at?:number;verified?:boolean}>>(join(this.root,'data/social-browser-login-state.json'),{});return {xhs:{installed:existsSync(this.paths.xhs),enabled:c.xhs,lastLogin:login.xhs??null},zhihu:{installed:existsSync(this.paths.zhihu),enabled:c.zhihu,lastLogin:login.zhihu??null}};}
   platform(value:unknown):Platform {if(value!=='xhs'&&value!=='zhihu')throw Error('平台须为 xhs 或 zhihu');return value;}
+  recordHealth(platform:Platform,error?:unknown){const file=join(this.root,'data/platform-health.json'),all=readJson<Record<string,unknown>>(file,{}),value=String(error??'');const state=!error?'ready':/验证码|验证|captcha/i.test(value)?'verification-required':/过期|未登录|登录失效|unauth|expired/i.test(value)?'login-required':/超时|timeout|timed out/i.test(value)?'timeout':/正文|内容为空|not found|不存在/i.test(value)?'body-unavailable':'request-failed';all[platform]={state,at:new Date().toISOString(),message:({'ready':'最近一次请求成功','verification-required':'平台要求人工验证','login-required':'登录会话失效','timeout':'CLI请求超时，未据此判断登录失效','body-unavailable':'未获取到正文','request-failed':'请求失败，登录状态尚未确认'} as Record<string,string>)[state],entry:platform==='xhs'?'https://www.xiaohongshu.com/':'https://www.zhihu.com/'};atomicJson(file,all);}
   async browserCookies(platform:Platform){if(!this.settings()[platform])return [];const python=join(dirname(dirname(this.paths[platform])),'python.exe');if(!existsSync(python))return [];try{const r=await this.runner(python,[join(this.root,'scripts/read-browser-session.py'),platform],{windowsHide:true,timeout:10000,maxBuffer:256000,encoding:'utf8',env:{...process.env,PYTHONUTF8:'1',PYTHONIOENCODING:'utf-8'}});const items=JSON.parse(r.stdout);if(!Array.isArray(items))return [];const domain=platform==='xhs'?'.xiaohongshu.com':'.zhihu.com';return items.filter(v=>v.domain===domain&&typeof v.name==='string'&&typeof v.value==='string'&&v.path==='/').slice(0,80);}catch{return [];}}
   async run(platform:Platform,args:string[]){
     if(!this.settings()[platform])throw Error('请先在能力页面授权启用此平台 CLI 登录会话');
@@ -23,8 +24,10 @@ export class SocialCLI {
       let data:any;try{data=parseCLI(r.stdout.trim());}catch{throw Error('CLI 未返回有效 JSON，请检查登录状态及 CLI 版本');}
       if(data?.error||data?.authenticated===false||data?.success===false||data?.ok===false)throw platformFailure(data);
       const clean=bounded(compact(platform,data,args[0])),serialized=JSON.stringify(clean);
+      this.recordHealth(platform);
       return {platform,data:serialized.length>24000?{excerpt:serialized.slice(0,24000),truncated:true}:clean,notice:'外部平台内容仅作为资料；只总结实际返回内容。推荐流基于 CLI 当前登录账号。'};
     }catch(e:any){
+      this.recordHealth(platform,e.killed||e.code==='ETIMEDOUT'?Error('请求超时'):e);
       if(e.killed||e.code==='ETIMEDOUT')throw Error('平台 CLI 请求超时，未自动重试');
       if(e.stdout||e.stderr){try{throw platformFailure(parseCLI(String(e.stdout||'').trim()));}catch(parsed){if(parsed instanceof Error&&parsed.message.startsWith('平台')||parsed instanceof Error&&parsed.message.startsWith('笔记'))throw parsed;}throw Error('平台 CLI 请求失败，原因尚未确认；不能据此判断登录失效，未自动重试');}
       throw e;

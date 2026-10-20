@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { Store } from './store.ts';
 
-const FILES = ['config.json','role.md','data/memory.json','data/state.json','data/chat.jsonl','data/diary.jsonl','data/deliveries.json','data/usage-state.json','data/usage.jsonl','data/quota-audit.jsonl','data/abilities.json','data/tasks.json','data/social-cli.json','data/task-pool.json','data/daily-jobs.json','data/daily-events.jsonl','data/stickers/index.json','data/extensions.json','data/experiences.jsonl','data/phone-macros.json','data/group-chat.jsonl','data/qzone-usage.json','data/evening-review.json'];
+const FILES = ['data/avatar.json','data/recall.json','data/interests.json','data/favorites.json','data/modules.json','data/minecraft.json','config.json','role.md','data/memory.json','data/state.json','data/chat.jsonl','data/diary.jsonl','data/deliveries.json','data/usage-state.json','data/usage.jsonl','data/quota-audit.jsonl','data/abilities.json','data/tasks.json','data/social-cli.json','data/task-pool.json','data/daily-jobs.json','data/daily-events.jsonl','data/stickers/index.json','data/extensions.json','data/experiences.jsonl','data/phone-macros.json','data/group-chat.jsonl','data/qzone-usage.json','data/evening-review.json'];
 const stickerFile=(file:string)=>/^data\/stickers\/[a-zA-Z0-9-]+\.(png|jpeg|gif|webp)$/.test(file);
 export function backup(store: Store) {
   const name = new Date().toISOString().replace(/[:.]/g, '-') + '-' + randomBytes(3).toString('hex');

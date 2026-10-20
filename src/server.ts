@@ -8,6 +8,7 @@ import { Companion } from './companion.ts';
 import { localEndpoint } from './onebot.ts';
 import { nextCheck } from './scheduler.ts';
 import { backup, backupList, restore, autostart } from './backup.ts';
+import {growthHttp,growthAsset} from './growth-http.ts';
 
 async function body(req: IncomingMessage,max=256000): Promise<any> {
   let value = ''; for await (const chunk of req) { value += chunk; if (Buffer.byteLength(value) > max) throw new Error('请求内容过大'); }
@@ -45,7 +46,7 @@ export function createHttp(app: Companion) {
   const store = app.store;
   const server = createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options','nosniff'); res.setHeader('Referrer-Policy','no-referrer');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' blob:; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     try {
       const host = req.headers.host || '';
       if (!/^(127\.0\.0\.1|localhost):\d+$/.test(host)) return response(res, 403, { error: '只允许本机访问' });
@@ -54,13 +55,15 @@ export function createHttp(app: Companion) {
       const url = new URL(req.url || '/', `http://${host}`), route = url.pathname;
       if (req.method === 'GET' && route === '/health') return response(res,200,{ ok:true, service:'qq-companion', pid:process.pid });
       if (!route.startsWith('/api/')) {
+        if(req.method==='GET'){const asset=growthAsset(store.root,route);if(asset){res.writeHead(200,{'Content-Type':asset.mime+'; charset=utf-8','Cache-Control':'no-store'});res.end(asset.bytes);return;}}
         const files: Record<string, [string,string]> = { '/':['index.html','text/html'], '/app.js':['app.js','text/javascript'], '/abilities.js':['abilities.js','text/javascript'], '/extensions.js':['extensions.js','text/javascript'], '/style.css':['style.css','text/css'] };
         if (req.method !== 'GET' || !files[route]) return response(res,404,{error:'不存在'});
         const [file, mime] = files[route]; res.writeHead(200,{'Content-Type':`${mime}; charset=utf-8`,'Cache-Control':'no-store'}); return res.end(readFileSync(join(store.root,'public',file)));
       }
       const supplied = Buffer.from((req.headers.authorization || '').replace(/^Bearer /,'')), token = Buffer.from(store.token());
       if (supplied.length !== token.length || !timingSafeEqual(supplied,token)) return response(res,401,{error:'请先输入管理令牌'});
-      const data = req.method === 'POST' ? await body(req,route==='/api/media/import'?42*1024*1024:route==='/api/stickers/import'?12*1024*1024:256000) : {};
+      const data = req.method === 'POST' ? await body(req,['/api/media/import','/api/voice/stream','/api/avatar/import'].includes(route)?42*1024*1024:route==='/api/stickers/import'?12*1024*1024:256000) : {};
+      if(await growthHttp(app,req.method??'GET',route,url,data,res))return;
       if (req.method === 'GET') {
         if(route==='/api/extensions')return response(res,200,app.extensions.status());
         if(route==='/api/experiences')return response(res,200,{items:app.extensions.experiences(url.searchParams.get('query')??'')});
