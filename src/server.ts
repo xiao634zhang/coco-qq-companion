@@ -9,6 +9,7 @@ import { localEndpoint } from './onebot.ts';
 import { nextCheck } from './scheduler.ts';
 import { backup, backupList, restore, autostart } from './backup.ts';
 import {growthHttp,growthAsset} from './growth-http.ts';
+import {stickerPacks,installStickerPack} from './sticker-library.ts';
 
 async function body(req: IncomingMessage,max=256000): Promise<any> {
   let value = ''; for await (const chunk of req) { value += chunk; if (Buffer.byteLength(value) > max) throw new Error('请求内容过大'); }
@@ -74,7 +75,7 @@ export function createHttp(app: Companion) {
         if (route === '/api/tasks') return response(res,200,{tasks:app.tasks.all(),pool:app.tasks.pool(),lanes:app.tasks.overview(),events:store.lines('task-events.jsonl').slice(-80)});
         if (route === '/api/task-pool') return response(res,200,app.tasks.pool());
         if (route === '/api/daily') return response(res,200,{jobs:app.daily.all(),events:store.lines('daily-events.jsonl').slice(-60)});
-        if (route === '/api/stickers') return response(res,200,{items:app.stickers.list()});
+        if (route === '/api/stickers') return response(res,200,{items:app.stickers.list(),settings:app.stickers.settings(),reason:app.stickers.reason(),packs:stickerPacks()});
         if (route === '/api/stickers/image') {const {item,path}=app.stickers.file(url.searchParams.get('id')??'');res.writeHead(200,{'Content-Type':'image/'+item.format,'Cache-Control':'no-store'});return res.end(readFileSync(path));}
         if (route === '/api/task-screenshot') { const id=url.searchParams.get('id');if(id&&!app.tasks.all().some(t=>t.id===id))throw Error('任务不存在');const p=id?join(store.data,'task-shots',id+'.png'):join(store.data,'latest-task.png');if(!existsSync(p))return response(res,404,{error:'暂无这次任务的截图'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store'});return res.end(readFileSync(p)); }
         if (route === '/api/status') return response(res,200,app.status());
@@ -113,6 +114,8 @@ export function createHttp(app: Companion) {
             case '/api/media/send': {const p=app.media.file(text(data.id,100));if(!p.endsWith('.mp3'))throw Error('请先生成MP3语音');const result=await app.sendVoice('voice-manual:'+Date.now(),readFileSync(p));if(result?.status!=='ok')throw Error('QQ未确认语音发送成功');return {message:'语音已发送到管理员QQ'};}
             case '/api/task-pool': return app.tasks.setLimit(data.maxTasks);
             case '/api/stickers/import': return {item:await app.stickers.import(data),message:'表情包已导入'};
+            case '/api/stickers/settings': return {settings:app.stickers.save(data),message:'表情设置已保存'};
+            case '/api/stickers/install': return installStickerPack(app.stickers,text(data.id,60));
             case '/api/stickers/remove': return app.stickers.remove(text(data.id,100));
             case '/api/daily/save': return app.daily.save(data);
             case '/api/daily/remove': return app.daily.remove(text(data.id,100));

@@ -13,6 +13,7 @@ import {toolResult} from '../src/tool-result.ts';
 import {backup,restore} from '../src/backup.ts';
 import {readFileSync} from 'node:fs';
 import sharp from 'sharp';
+import {installStickerPack,packEntries} from '../src/sticker-library.ts';
 
 const png=await sharp({create:{width:2,height:2,channels:4,background:'#88ccaa'}}).png().toBuffer();
 function fixture(t:any){
@@ -41,8 +42,36 @@ test('AIHOT 热榜使用官方JSON和原顺序，校验链接，失败不编造'
 test('模拟器截图直接捕获当前任意App，不依赖2048或模型视觉验证',async t=>{const{app,sent}=fixture(t);app.tasks.abilities.save({android:true});let calls=0;app.tasks.abilities.phone.call=async(name)=>{assert.equal(name,'phone_screenshot');calls++;return {image:png,text:'任意App截图'};};app.tasks.abilities.vision=()=>{throw Error('不应要求模型看图');};await app.screenshots.send('android');assert.equal(calls,1);assert(sent[0].image?.equals(png));assert.match(sent[0].text,/当前 App/);});
 test('网页截图必须来自实际打开的coco浏览器，不拿旧图冒充CLI画面',async t=>{const{app,store,sent}=fixture(t);app.tasks.abilities.save({web:true});writeFileSync(join(store.data,'latest-task.png'),png);await assert.rejects(()=>app.screenshots.send('web'),/尚无打开/);assert.equal(sent.length,0);app.tasks.abilities.browser.page={isClosed:()=>false} as any;app.tasks.abilities.browser.screenshot=async()=>png;await app.screenshots.send('web');assert(sent[0].image?.equals(png));assert.match(sent[0].text,/当前网页/);app.tasks.abilities.browser.page=undefined;});
 test('图库内置六张可用表情，可查询、发送及移出后不重建',async t=>{const{app,sent}=fixture(t);await app.stickers.init();assert.equal(app.stickers.list().length,6);const item=app.stickers.list('安慰')[0];assert.equal(item.name,'抱抱');await app.stickers.send(item.id);assert(sent[0].image!.length>0);app.stickers.remove(item.id);await app.stickers.init();assert.equal(app.stickers.list().length,5);await assert.rejects(()=>app.stickers.send(item.id),/不存在/);});
+test('常用图库按固定来源下载，重复安装不覆盖用户移除的图片，失败可补装',async t=>{
+ const {app}=fixture(t);let calls=0;
+ const result=await installStickerPack(app.stickers,'panda',async url=>{assert.equal(new URL(url).hostname,'raw.githubusercontent.com');calls++;if(calls===2)throw Error('网络错误');return png;});
+ assert.equal(result.installed,23);assert.equal(result.failures.length,1);
+ const id=packEntries('panda')[0].id;app.stickers.remove(id);
+ const retry=await installStickerPack(app.stickers,'panda',async()=>png);assert.equal(retry.installed,1);assert.equal(retry.existing,23);assert(!app.stickers.list().some(x=>x.id===id));
+ assert(app.stickers.list().every(x=>x.source?.startsWith('https://raw.githubusercontent.com/zhaoolee/ChineseBQB/')));
+ await assert.rejects(()=>installStickerPack(app.stickers,'https://evil.invalid'),/未知/);
+});
 test('导入GIF保持原始字节，重复导入更新同一项，WebP也可发送',async t=>{const{app,sent}=fixture(t);const gif=Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7','base64');const item=await app.stickers.import({name:'动态表情',tags:['开心'],data:gif.toString('base64')});assert.equal(item.format,'gif');await app.stickers.send(item.id);assert(sent[0].image?.equals(gif));const same=await app.stickers.import({name:'换名',data:gif.toString('base64')});assert.equal(same.id,item.id);assert.equal(app.stickers.list().length,1);const webp=await sharp(png).webp().toBuffer();const w=await app.stickers.import({name:'WebP',data:webp.toString('base64')});assert.equal(w.format,'webp');await app.stickers.send(w.id);assert(sent[1].image?.equals(webp));});
 test('伪装图片、非法ID和超大表情被拒绝',async t=>{const{app}=fixture(t);await assert.rejects(()=>app.stickers.import({name:'脚本',data:Buffer.from('<script>alert(1)</script>').toString('base64')}),/支持/);await assert.rejects(()=>app.stickers.import({name:'错误PNG',data:Buffer.concat([png.subarray(0,8),Buffer.from('bad')]).toString('base64')}));assert.throws(()=>app.stickers.file('../secret'),/无效/);await assert.rejects(()=>app.stickers.import({name:'大图',data:'A'.repeat(12*1024*1024+1)}),/无效/);});
 test('表情工具按真实ID发送，每轮不刷屏且主动聊天不可发送',async t=>{const{app}=fixture(t);await app.stickers.init();await assert.rejects(async()=>app.tool('companion_sticker_send',{id:'coco-happy'}),/管理员/);app.tasks.allowStart=true;await app.tool('companion_sticker_send',{id:'coco-happy'});assert.throws(()=>app.tool('companion_sticker_send',{id:'coco-ok'}),/本轮/);});
+test('自主表情无需索要，冷却和最近三张限制跨重启保留，明确索要可发送',async t=>{
+ const {app,store,sent}=fixture(t);await app.stickers.init();app.tasks.allowStart=true;
+ app.stickers.begin('qq','今天考试终于过了！');assert.match(app.stickers.prompt(),/可以像日常聊天/);
+ await app.tool('companion_sticker_send',{id:'coco-ok'});assert.equal(sent.length,1);
+ app.stickers.begin('qq','好开心');await assert.rejects(async()=>app.tool('companion_sticker_send',{id:'coco-happy'}),/冷却/);
+ const restored=new (app.stickers.constructor as any)(app);assert.match(restored.reason(),/冷却/);
+ t.mock.timers.setTime(Date.now()+6*60000);assert.match(restored.reason('coco-ok'),/最近三张/);
+ app.stickers.save({automatic:false});app.stickers.begin('qq','给我发表情包');await app.tool('companion_sticker_send',{id:'coco-hug'});assert.equal(sent.length,2);
+ const saved=backup(store);app.stickers.save({automatic:true});restore(store,saved);assert.equal(app.stickers.settings().automatic,false);
+});
+test('自主表情北京时间每日限额和不确定发送均占用记录，非QQ会话不发',async t=>{
+ const {app}=fixture(t);await app.stickers.init();app.tasks.allowStart=true;app.stickers.save({dailyMax:1});
+ app.deliver=async()=>({kind:'uncertain',error:'timeout'});
+ app.stickers.begin('qq','哈哈哈');await assert.rejects(async()=>app.tool('companion_sticker_send',{id:'coco-happy'}),/timeout/);assert.match(app.stickers.reason(),/上限/);
+ t.mock.timers.setTime(Date.parse('2026-10-18T16:01:00Z'));assert.equal(app.stickers.reason(),'');
+ app.stickers.begin('local','发表情包');assert.throws(()=>app.tool('companion_sticker_send',{id:'coco-ok'}),/QQ私聊/);
+ assert.throws(()=>app.stickers.save({cooldownMinutes:0}),/范围/);
+});
 test('表情图库和图片二进制一起备份恢复，保持内容一致',async t=>{const{app,store}=fixture(t);const item=await app.stickers.import({name:'测试图',data:png.toString('base64')});const saved=backup(store);app.stickers.remove(item.id);restore(store,saved);assert.equal(app.stickers.list().length,1);assert(readFileSync(app.stickers.file(item.id).path).equals(png));});
 test('OneBot原样发送GIF和WebP字节',async t=>{const{store}=fixture(t);const qq=new OneBot(()=>store.config(),()=>{});qq.connected=true;qq.online=true;const bodies:any[]=[];qq.api=async(_a,body)=>{bodies.push(body);return {status:'ok',data:{message_id:1}};};const gif=Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7','base64'),webp=await sharp(png).webp().toBuffer();for(const bytes of [gif,webp])assert.equal((await qq.send('表情',bytes)).kind,'sent');assert.equal(bodies[0].message[1].data.file,'base64://'+gif.toString('base64'));assert.equal(bodies[1].message[1].data.file,'base64://'+webp.toString('base64'));});
+test('表情直接发送图片消息，不附带表情名称或空文本段',async t=>{const{store}=fixture(t);const qq=new OneBot(()=>store.config(),()=>{});qq.connected=true;qq.online=true;let body:any;qq.api=async(_a,b)=>{body=b;return {status:'ok',data:{message_id:1}};};await qq.send('',png);assert.equal(body.message.length,1);assert.equal(body.message[0].type,'image');});

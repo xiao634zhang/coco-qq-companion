@@ -12,3 +12,7 @@
 - Kokoro 模型及其音色、Whisper 模型有独立许可；下载前查阅对应模型仓库。角色示例为本项目简短模板，不包含个人定制角色卡。
 
 本项目与上述平台没有官方关联。
+
+## 可选表情图库
+
+管理页可下载 [zhaoolee/ChineseBQB](https://github.com/zhaoolee/ChineseBQB) 中精选的熊猫头及猫猫表情（含 GIF）。图片保存在本机 data/stickers，并逐张记录上游 URL；本仓库只提供目录和下载逻辑，不随 MIT 源码分发图片。原表情图的权利归各自权利人，源码许可证不改变图片权利。

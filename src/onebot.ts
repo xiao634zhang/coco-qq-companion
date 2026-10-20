@@ -88,7 +88,7 @@ export class OneBot extends EventEmitter {
     if (!/^\d{5,12}$/.test(owner) || owner === this.selfId) return { kind: 'failed', error: '管理员配置无效' };
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const message:any[]=[{type:'text',data:{text:value.slice(0,4000)}}];
+        const message:any[]=value||!image?[{type:'text',data:{text:value.slice(0,4000)}}]:[];
         if(image)message.push({type:'image',data:{file:'base64://'+image.toString('base64')}});
         const result = await this.api('send_private_msg', { user_id: Number(owner), message });
         if (result.status === 'ok' && result.data?.message_id !== undefined) return { kind: 'sent', messageId: String(result.data.message_id) };
