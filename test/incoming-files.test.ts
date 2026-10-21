@@ -28,6 +28,15 @@ test('QQ文件按ID向网关获取链接，下载正文，拒绝内网和恶意�
  const offline=await f.incoming({data:{name:'offline.txt',url:'https://file.qq.com/offline'}},{api:async()=>{throw Error('不应再次查询ID');}},'12345',async()=>new Response('离线文件正文') as any);assert.equal(offline.text,'离线文件正文');
  for(const u of ['http://127.0.0.1/ftn_handler/x','http://10.1.2.3/ftn_handler/x','https://evil.invalid/a','file:///a'])assert.equal(validFileURL(new URL(u)),false);
  assert(validFileURL(new URL('http://123.4.5.6/ftn_handler/a')));
+ assert(validFileURL(new URL('http://123.4.5.6/asn.com/qqdownloadftnv5?fname=example.docx')));
+ assert(!validFileURL(new URL('http://127.0.0.1/asn.com/qqdownloadftnv5')));
+});
+test('网关把文件降级成占位符时优先同一消息ID的完整缓存',async()=>{
+ const cached={user_id:'12345',message:[{type:'file',data:{id:'f1',name:'example.docx'}}]};
+ for(const message of ['[文件]',[{type:'text',data:{text:'[文件]'}}]]){
+  const r=await quotedMessage({post_type:'message',message:[{type:'reply',data:{id:'1'}}]},{api:async()=>({status:'ok',data:{user_id:'12345',message}})},'12345','54321',()=>cached);
+  assert.equal(r.files.length,1);assert.match(r.text,/example.docx/);
+ }
 });
 test('每天两次保底按北京时间12点20点安排，保留暂停额度间隔和午夜限制',t=>{
  const store=fixture(t),c=store.config();c.ownerQQ='12345';c.proactive.dailyMin=2;

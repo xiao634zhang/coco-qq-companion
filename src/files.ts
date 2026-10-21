@@ -10,7 +10,7 @@ export function validFileURL(u:URL){
  if(!['https:','http:'].includes(u.protocol)||u.username||u.password)return false;
  if(['qq.com','qq.com.cn','qpic.cn','gtimg.cn'].some(h=>u.hostname===h||u.hostname.endsWith('.'+h)))return true;
  // QQ offline files can use a public IPv4 FTN endpoint supplied by the gateway.
- const parts=u.hostname.split('.').map(Number);if(parts.length!==4||parts.some(x=>!Number.isInteger(x)||x<0||x>255)||!u.pathname.startsWith('/ftn_handler/'))return false;
+ const parts=u.hostname.split('.').map(Number);if(parts.length!==4||parts.some(x=>!Number.isInteger(x)||x<0||x>255)||!(u.pathname.startsWith('/ftn_handler/')||u.pathname==='/asn.com/qqdownloadftnv5'))return false;
  const [a,b]=parts;return a>0&&a<224&&a!==10&&a!==127&&!(a===169&&b===254)&&!(a===172&&b>=16&&b<=31)&&!(a===192&&b===168)&&!(a===100&&b>=64&&b<=127)&&!(a===198&&(b===18||b===19));
 }
 export class Files{

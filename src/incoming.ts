@@ -20,7 +20,13 @@ export async function quotedMessage(event:PrivateEvent,qq:{api:(action:string,ar
   try{
    const id=String(ref.data?.id??'');if(!/^-?\d{1,30}$/.test(id))throw Error('引用ID无效');
    let m:any;try{const r=await qq.api('get_msg',{message_id:id});if(r.status==='ok')m=r.data;}catch{}
-   m??=fallback?.(id);if(!m)throw Error('原消息已过期或网关未缓存');
+   const cached=fallback?.(id);
+   // get_msg may flatten an attachment into the literal "[文件]".
+   // Prefer the received structured event for that exact message ID.
+   const cachedMedia=Array.isArray(cached?.message)&&cached.message.some((s:any)=>['file','image','record'].includes(s.type));
+   const freshMedia=Array.isArray(m?.message)&&m.message.some((s:any)=>['file','image','record'].includes(s.type));
+   if(cached&&(!m||!Array.isArray(m.message)&&Array.isArray(cached.message)||cachedMedia&&!freshMedia))m=cached;
+   m??=cached;if(!m)throw Error('原消息已过期或网关未缓存');
    const sender=String(m.sender?.user_id??m.user_id??'');
    if(m.group_id||m.message_type==='group'||![owner,bot].includes(sender))throw Error('原消息不属于当前私聊');
    parts.push(`[引用原消息 · ${sender===owner?'你':'coco'}]\n${privateText(m).slice(0,8000)}\n[引用结束]`);
