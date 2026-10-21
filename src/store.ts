@@ -17,7 +17,7 @@ export interface Config {
   codexPath: string;
   budget: { enabled: boolean; maxPercent: number; reservePercent: number };
   snow: { wsUrl: string; httpUrl: string; accessToken: string; httpAccessToken?: string };
-  proactive: { enabled: boolean; startHour: number; endHour: number; idleMinutes: number; minMinutes: number; maxMinutes: number; gapMinutes: number; dailyMax: number };
+  proactive: { enabled: boolean; startHour: number; endHour: number; idleMinutes: number; minMinutes: number; maxMinutes: number; gapMinutes: number; dailyMax: number; dailyMin?:number };
 }
 export interface State {
   paused: boolean;
@@ -67,7 +67,7 @@ export class Store {
   defaults(): Config {
     return { ownerQQ: '', botQQ: '', model: '', effort: '', port: 3210, codexPath: '', budget: { enabled: false, maxPercent: 20, reservePercent: 20 },
       snow: { wsUrl: 'ws://127.0.0.1:3001', httpUrl: 'http://127.0.0.1:3000', accessToken: '' },
-      proactive: { enabled: true, startHour: 8, endHour: 24, idleMinutes: 30, minMinutes: 30, maxMinutes: 90, gapMinutes: 60, dailyMax: 8 } };
+      proactive: { enabled: true, startHour: 8, endHour: 24, idleMinutes: 30, minMinutes: 30, maxMinutes: 90, gapMinutes: 60, dailyMax: 8, dailyMin:0 } };
   }
   config(): Config {
     const d = this.defaults(), c = readJson(join(this.root, 'config.json'), d);

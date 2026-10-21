@@ -17,7 +17,7 @@ export function imageFormat(bytes:Buffer){
   return null;
 }
 export function privateText(event: PrivateEvent): string {
-  if (Array.isArray(event.message)) return event.message.map(s => s.type === 'text' ? String(s.data?.text || '') : `[${s.type}消息，当前版本仅支持文字]`).join('').trim();
+  if (Array.isArray(event.message)) return event.message.map(s => s.type === 'text' ? String(s.data?.text || '') : s.type==='file'?`[附件：${s.data?.name??s.data?.file_name??'文件'}]`:s.type==='reply'?'[引用消息]':`[${s.type}消息]`).join('').trim();
   return String(event.message || event.raw_message || '').replace(/\[CQ:[^\]]*\]/g, '[媒体消息，当前版本仅支持文字]').trim();
 }
 export class OneBot extends EventEmitter {

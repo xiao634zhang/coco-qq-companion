@@ -22,6 +22,7 @@
 !/scripts/backup.ps1
 !/scripts/health.ps1
 !/scripts/media-worker.py
+!/scripts/document-worker.py
 !/scripts/open-console.ps1
 !/scripts/paths.ps1
 !/scripts/read-browser-session.py

@@ -29,12 +29,13 @@ export function validateConfig(current: Config, input: any): Config {
   }
   if (input.proactive) {
     if (input.proactive.enabled !== undefined) { if (typeof input.proactive.enabled !== 'boolean') throw new Error('主动开关无效'); c.proactive.enabled = input.proactive.enabled; }
-    const ranges = { startHour: [0,23], endHour: [1,24], idleMinutes: [30,1440], minMinutes: [30,1440], maxMinutes: [30,1440], gapMinutes: [60,1440], dailyMax: [0,8] };
+    const ranges = { startHour: [0,23], endHour: [1,24], idleMinutes: [30,1440], minMinutes: [30,1440], maxMinutes: [30,1440], gapMinutes: [60,1440], dailyMax: [0,8], dailyMin:[0,8] };
     for (const [key, range] of Object.entries(ranges)) if (input.proactive[key] !== undefined) {
       const v = input.proactive[key]; if (!Number.isInteger(v) || v < range[0] || v > range[1]) throw new Error(`主动设置 ${key} 超出范围`);
       (c.proactive as any)[key] = v;
     }
     if (c.proactive.startHour >= c.proactive.endHour || c.proactive.minMinutes > c.proactive.maxMinutes) throw new Error('主动时间范围无效');
+    if((c.proactive.dailyMin??0)>c.proactive.dailyMax)throw Error('每日主动保底不能超过每日上限');
   }
   if(input.budget){
     const reserve=input.budget.reservePercent??c.budget.reservePercent;
